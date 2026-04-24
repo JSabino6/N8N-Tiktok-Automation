@@ -30,7 +30,7 @@ Reduzir tempo operacional e padronizar a criacao/publicacao de conteudo para Tik
 
 ## Estrutura do repositorio
 
-- `Desafio RPA TikTok - Bot Dinamico Master (2).json`: workflow exportado do n8n
+- `workflow-n8n-tiktok-automation.json.json`: workflow exportado do n8n
 - `docker-compose.n8n.yml`: ambiente local com Docker
 - `ENTREGA_CASE/`: documentacao de implementacao, custos, riscos e melhorias
 
