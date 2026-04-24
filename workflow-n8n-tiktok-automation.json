@@ -1,0 +1,706 @@
+{
+  "name": "Desafio RPA TikTok - Bot Dinâmico Master",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "b1a03153-b45f-4296-a511-4d5422b5493a",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -144,
+        976
+      ],
+      "webhookId": "72cc1ae5-a8ab-41b2-8f36-ce8b1a436053",
+      "credentials": {
+        "telegramApi": {                              
+          "id": "9lRZCWLhK6ZYcPMx",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.message ? 'link' : 'botao' }}",
+              "rightValue": "link",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "acc2ecbc-9359-4c59-ad0d-24d7b812b02c",
+      "name": "É Link ou Botão?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        96,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = ($input.item.json.message?.text || \"\").trim();\nconst chatId = $input.item.json.message?.chat?.id;\n\nif (!text) {\n  throw new Error(\"Envie um link do Google Drive ou apenas o ID do arquivo.\");\n}\n\n// Aceita links completos e tambem o ID puro.\nconst patterns = [\n  /drive\\.google\\.com\\/file\\/d\\/([-\\w]{25,})/i,\n  /drive\\.google\\.com\\/open\\?id=([-\\w]{25,})/i,\n  /drive\\.google\\.com\\/uc\\?.*id=([-\\w]{25,})/i,\n  /^([-\\w]{25,})$/\n];\n\nlet driveId = null;\nfor (const pattern of patterns) {\n  const match = text.match(pattern);\n  if (match?.[1]) {\n    driveId = match[1];\n    break;\n  }\n}\n\nif (!driveId) {\n  throw new Error(\"Nao consegui encontrar um ID valido do Google Drive nesse texto.\");\n}\n\nreturn {\n  json: {\n    id: driveId,\n    chatId\n  }\n};"
+      },
+      "id": "aa4bb719-196d-47ee-b699-638699bb93c4",
+      "name": "Extrair ID do Link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://drive.google.com/uc?export=download&id={{ $json.id }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "a4593d3d-cb4f-4300-b5b7-5518c83fc053",
+      "name": "Download Vídeo Inicial",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        528,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (items[0].binary && items[0].binary.data) {\n  // Mascara para o Whisper aceitar o formato\n  items[0].binary.file = JSON.parse(JSON.stringify(items[0].binary.data));\n  items[0].binary.file.fileName = 'audio.m4a';\n  items[0].binary.file.mimeType = 'audio/mp4';\n}\nreturn items;"
+      },
+      "id": "c1595646-3fe6-4ac4-987a-495bb4cb35e1",
+      "name": "Preparar Binário Áudio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "whisper-large-v3"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "516727be-faf4-45ce-aa8c-61b09f159c03",
+      "name": "Transcrever Áudio (Whisper)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        944,
+        768
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "lzzMNYcZchKePHFv",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.1-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Voce e um Social Media Manager especialista em TikTok. Crie legendas naturais, humanas e com gancho forte. Nunca explique seu raciocinio.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Com base na transcricao abaixo, gere UMA legenda pronta para postagem.\\n\\nTRANSCRICAO:\\n'{{ $('Transcrever Áudio (Whisper)').item.json.text }}'\\n\\nREGRAS:\\n1. Entregue somente a legenda final.\\n2. Maximo de 220 caracteres no texto principal.\\n3. Tom direto, com curiosidade e sem parecer roboto.\\n4. Inclua exatamente 5 hashtags relevantes no final.\\n5. Nao use aspas no inicio ou no fim.\"\n    }\n  ],\n  \"temperature\": 0.7\n}",
+        "options": {}
+      },
+      "id": "99641e82-efbb-4242-bb7c-6e1016631db8",
+      "name": "Gerar Legenda IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1136,
+        768
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "lzzMNYcZchKePHFv",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst videoDownload = $('Download Vídeo Inicial').first();\nconst rawCaption = $('Gerar Legenda IA').item.json?.choices?.[0]?.message?.content || '';\nconst cleanCaption = rawCaption\n  .replace(/^[\\\"']+|[\\\"']+$/g, '')\n  .replace(/\\r?\\n{2,}/g, '\\n')\n  .trim();\n\nitems[0].json.caption = (cleanCaption || 'Legenda gerada automaticamente.').slice(0, 1024);\n\n// Puxa o binario do video para enviar no preview do Telegram.\nif (videoDownload?.binary) {\n  items[0].binary = videoDownload.binary;\n}\n\nreturn items;"
+      },
+      "id": "753456e9-bf5f-4273-b948-cf25377c6666",
+      "name": "Recuperar Vídeo Preview",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendVideo",
+        "chatId": "={{ $('Extrair ID do Link').item.json.chatId }}",
+        "binaryData": true,
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ Aprovar e Postar",
+                    "additionalFields": {
+                      "callback_data": "=ok_{{ $('Extrair ID do Link').item.json.id }}"
+                    }
+                  },
+                  {
+                    "text": "❌ Recusar",
+                    "additionalFields": {
+                      "callback_data": "=no_{{ $('Extrair ID do Link').item.json.id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "caption": "={{ $json.caption }}"
+        }
+      },
+      "id": "aab034ed-8cc5-48ca-bda4-364c919540eb",
+      "name": "Enviar para Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1536,
+        768
+      ],
+      "webhookId": "896169b4-2783-4173-9e2b-08a1b6e18223",
+      "credentials": {
+        "telegramApi": {
+          "id": "9lRZCWLhK6ZYcPMx",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cb = $input.item.json.callback_query;\nif (!cb?.data) return [];\n\n// Divide apenas no primeiro underscore para preservar IDs com '_'.\nconst separatorIndex = cb.data.indexOf('_');\nif (separatorIndex < 1) {\n  throw new Error('Callback invalido recebido no Telegram.');\n}\n\nconst action = cb.data.slice(0, separatorIndex);\nconst driveId = cb.data.slice(separatorIndex + 1);\n\nreturn {\n  json: {\n    action,\n    driveId,\n    callbackId: cb.id,\n    caption: cb.message?.caption || '',\n    chatId: cb.message?.chat?.id\n  }\n};"
+      },
+      "id": "b749c050-f87e-44c4-8c84-288cd8eac65c",
+      "name": "Decodificar Botão",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $json.callbackId }}",
+        "additionalFields": {
+          "show_alert": true,
+          "text": "❌ Postagem Cancelada pelo usuário."
+        }
+      },
+      "id": "14cc6196-aa2e-4745-9ea5-d528abaee7ca",
+      "name": "Resposta: Recusado",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        768,
+        1008
+      ],
+      "webhookId": "a50527e3-9e4c-4584-82b5-9cf9a3499662",
+      "credentials": {
+        "telegramApi": {
+          "id": "9lRZCWLhK6ZYcPMx",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $json.callbackId }}",
+        "additionalFields": {
+          "show_alert": true,
+          "text": "✅ Iniciando Postagem no TikTok..."
+        }
+      },
+      "id": "aca9d8ad-3b04-4f05-9fe2-d1d853b93131",
+      "name": "Resposta: Aprovado",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        768,
+        1232
+      ],
+      "webhookId": "b701298c-4abf-4c96-9295-998f9acd239e",
+      "credentials": {
+        "telegramApi": {
+          "id": "9lRZCWLhK6ZYcPMx",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://drive.google.com/uc?export=download&id={{ $('Decodificar Botão').item.json.driveId }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "9ad3087b-fe2e-4bcd-a680-136996dd076f",
+      "name": "Download para TikTok",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        976,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst binary = item.binary?.data;\n\nif (!binary?.data) {\n  throw new Error('Nao foi encontrado o binario do video para upload no TikTok.');\n}\n\nfunction parseFileSize(raw) {\n  if (typeof raw === 'number' && Number.isFinite(raw)) {\n    return Math.max(1, Math.round(raw));\n  }\n  if (typeof raw !== 'string') {\n    return null;\n  }\n\n  const normalized = raw.trim().replace(',', '.');\n  const match = normalized.match(/^([\\d.]+)\\s*([KMGTP]?i?B)?$/i);\n  if (!match) {\n    return null;\n  }\n\n  const value = Number(match[1]);\n  if (!Number.isFinite(value)) {\n    return null;\n  }\n\n  const unit = (match[2] || 'B').toUpperCase();\n  const unitMap = {\n    B: 1,\n    KB: 1000,\n    MB: 1000 * 1000,\n    GB: 1000 * 1000 * 1000,\n    TB: 1000 * 1000 * 1000 * 1000,\n    KIB: 1024,\n    MIB: 1024 * 1024,\n    GIB: 1024 * 1024 * 1024,\n    TIB: 1024 * 1024 * 1024 * 1024\n  };\n\n  const factor = unitMap[unit] || 1;\n  return Math.max(1, Math.round(value * factor));\n}\n\nconst bytesFromMeta = parseFileSize(binary.fileSize);\nconst bytesFromBase64 = Buffer.byteLength(binary.data, 'base64');\nconst videoSizeBytes = bytesFromMeta || bytesFromBase64;\n\nconst rawCaption = $('Decodificar Botão').item.json.caption || '';\nconst tiktokTitle = rawCaption\n  .replace(/[\\r\\n]+/g, ' ')\n  .replace(/\\s{2,}/g, ' ')\n  .replace(/[\\\"`]/g, '')\n  .trim()\n  .slice(0, 150) || 'Postagem automatica via n8n';\n\nreturn {\n  json: {\n    ...item.json,\n    videoSizeBytes,\n    tiktokTitle\n  },\n  binary: item.binary\n};"
+      },
+      "id": "d95d7756-3ad9-4382-a84a-366fd50389b2",
+      "name": "Preparar Upload TikTok",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.TIKTOK_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=UTF-8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"post_info\": {\n    \"title\": \"{{ $json.tiktokTitle }}\",\n    \"privacy_level\": \"SELF_ONLY\"\n  },\n  \"source_info\": {\n    \"source\": \"FILE_UPLOAD\",\n    \"video_size\": {{ $json.videoSizeBytes }},\n    \"chunk_size\": {{ $json.videoSizeBytes }},\n    \"total_chunk_count\": 1\n  }\n}",
+        "options": {}
+      },
+      "id": "b16be2bc-9ee6-45d7-82c5-24f5312c53c7",
+      "name": "1. Iniciar Upload (TikTok)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1184,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst preparedUpload = $('Preparar Upload TikTok').first();\n\nif (preparedUpload?.binary) {\n  items[0].binary = preparedUpload.binary;\n}\n\nitems[0].json = {\n  ...items[0].json,\n  videoSizeBytes: preparedUpload?.json?.videoSizeBytes\n};\n\nreturn items;"
+      },
+      "id": "4a607b78-168c-4240-b947-0c5f84ae9547",
+      "name": "Recuperar Binário TikTok",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1376,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.data.upload_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Range",
+              "value": "=bytes 0-{{ $json.videoSizeBytes - 1 }}/{{ $json.videoSizeBytes }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "22c2d9f2-621d-4f71-a739-673f44687dab",
+      "name": "2. Enviar Arquivo (TikTok)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1584,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Decodificar Botão').item.json.chatId }}",
+        "text": "={{ '✅ Upload enviado ao TikTok com sucesso!\\n📌 Publish ID: ' + ($('1. Iniciar Upload (TikTok)').item.json.data?.publish_id || 'N/A') }}"
+      },
+      "id": "7f6df6e8-1df8-4fbb-a9bd-5f1555ba8d95",
+      "name": "Confirmação: Upload TikTok",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1792,
+        1232
+      ],
+      "webhookId": "4cfc4dbf-5426-4cdf-a54c-1f65488f2a41",
+      "credentials": {
+        "telegramApi": {
+          "id": "9lRZCWLhK6ZYcPMx",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "a7c7eb66-a603-46e0-8d1d-1f7f405bb7d7",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "8451500331",
+        "text": "🚨 *Falha Crítica na Automação!*\n*Nó:* `{{ $json.execution.lastNodeExecuted }}`\n*Erro:* {{ $json.execution.error.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "592bb9be-80d1-4b17-883d-b62be6655e12",
+      "name": "Alerta de Erro",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        96,
+        1312
+      ],
+      "webhookId": "53ab341f-b0db-4365-8c03-8ff23adae8eb",
+      "credentials": {
+        "telegramApi": {
+          "id": "9lRZCWLhK6ZYcPMx",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "51d1a918-1b11-4514-b779-0701e8311491"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cce50b04-cdee-4c1e-923d-924d5ca0588a",
+      "name": "Foi Aprovado?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        512,
+        1136
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "É Link ou Botão?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É Link ou Botão?": {
+      "main": [
+        [
+          {
+            "node": "Extrair ID do Link",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decodificar Botão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair ID do Link": {
+      "main": [
+        [
+          {
+            "node": "Download Vídeo Inicial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Vídeo Inicial": {
+      "main": [
+        [
+          {
+            "node": "Preparar Binário Áudio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Binário Áudio": {
+      "main": [
+        [
+          {
+            "node": "Transcrever Áudio (Whisper)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcrever Áudio (Whisper)": {
+      "main": [
+        [
+          {
+            "node": "Gerar Legenda IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar Legenda IA": {
+      "main": [
+        [
+          {
+            "node": "Recuperar Vídeo Preview",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recuperar Vídeo Preview": {
+      "main": [
+        [
+          {
+            "node": "Enviar para Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decodificar Botão": {
+      "main": [
+        [
+          {
+            "node": "Foi Aprovado?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resposta: Aprovado": {
+      "main": [
+        [
+          {
+            "node": "Download para TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download para TikTok": {
+      "main": [
+        [
+          {
+            "node": "Preparar Upload TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Upload TikTok": {
+      "main": [
+        [
+          {
+            "node": "1. Iniciar Upload (TikTok)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Iniciar Upload (TikTok)": {
+      "main": [
+        [
+          {
+            "node": "Recuperar Binário TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recuperar Binário TikTok": {
+      "main": [
+        [
+          {
+            "node": "2. Enviar Arquivo (TikTok)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Enviar Arquivo (TikTok)": {
+      "main": [
+        [
+          {
+            "node": "Confirmação: Upload TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Alerta de Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Foi Aprovado?1": {
+      "main": [
+        [
+          {
+            "node": "Resposta: Aprovado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resposta: Recusado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "2fb08248-d71e-4185-8a8e-0d16b8a9e91a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a68b6275d31bfc91185e8b8edce08fd2a7f86eb356841e2fcfea1c0325d279bd"
+  },
+  "id": "5TCznqOEOdJIc0aw",
+  "tags": []
+}
